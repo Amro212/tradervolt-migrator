@@ -2,13 +2,15 @@
 TraderVolt API Client
 
 Handles authentication, token refresh, rate limiting, and API calls.
+Automatically logs in using credentials from environment variables.
 """
 
 import os
 import json
 import time
 import logging
-from datetime import datetime, timezone
+import re
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
 from urllib.parse import urljoin
@@ -26,101 +28,165 @@ logger = logging.getLogger(__name__)
 
 
 class TokenManager:
-    """Manages access token lifecycle with automatic refresh."""
+    """
+    Manages access token lifecycle with automatic login and refresh.
+    
+    Authentication flow:
+    1. Try to load cached token from out/token.json
+    2. If valid (not expired), use it
+    3. If expired, try to refresh using refresh token
+    4. If refresh fails or no cached token, login with credentials from env vars
+    5. Cache new tokens to out/token.json for next run
+    """
+    
+    BASE_URL = "https://api.tradervolt.com"
     
     def __init__(self):
         self.access_token: Optional[str] = None
         self.refresh_token: Optional[str] = None
         self.access_token_expires_at: Optional[datetime] = None
         self.refresh_token_expires_at: Optional[datetime] = None
-        self.base_url = "https://api.tradervolt.com"
         
+        # Determine token cache path
+        self.project_root = Path(__file__).parent.parent.parent
+        self.token_cache_path = self.project_root / 'out' / 'token.json'
+    
     def _parse_iso_timestamp(self, timestamp_str: str) -> Optional[datetime]:
         """Parse ISO timestamp with various formats."""
         if not timestamp_str:
             return None
         try:
-            # Handle high-precision timestamps like '2026-01-22T20:30:13.6607010+00:00'
-            # Python's fromisoformat can't handle more than 6 decimal places
-            import re
-            # Truncate microseconds to 6 digits
+            # Handle high-precision timestamps (>6 decimal places)
             timestamp_str = re.sub(r'(\.\d{6})\d+', r'\1', timestamp_str)
-            # Handle Z suffix
             timestamp_str = timestamp_str.replace('Z', '+00:00')
             return datetime.fromisoformat(timestamp_str)
         except Exception as e:
-            logger.warning(f"Failed to parse timestamp '{timestamp_str}': {e}")
+            logger.debug(f"Failed to parse timestamp '{timestamp_str}': {e}")
             return None
     
-    def load_token(self) -> bool:
-        """Load token from environment variable or token.json file."""
-        # Try environment variable first
-        token = os.environ.get('TRADERVOLT_ACCESS_TOKEN')
-        if token:
-            self.access_token = token
-            # Assume 5 min validity if loaded from env (will refresh on 401)
-            self.access_token_expires_at = datetime.now(timezone.utc)
-            logger.info("Loaded access token from TRADERVOLT_ACCESS_TOKEN env var")
-            return True
-        
-        # Try token.json file in project root
-        project_root = Path(__file__).parent.parent.parent
-        token_file = project_root / 'token.json'
-        if token_file.exists():
-            try:
-                with open(token_file, 'r') as f:
-                    data = json.load(f)
-                self.access_token = data.get('accessToken')
-                self.refresh_token = data.get('refreshToken')
-                self.access_token_expires_at = self._parse_iso_timestamp(
-                    data.get('accessTokenExpiresAt', '')
-                )
-                self.refresh_token_expires_at = self._parse_iso_timestamp(
-                    data.get('refreshTokenExpiresAt', '')
-                )
-                logger.info("Loaded tokens from token.json")
-                return True
-            except Exception as e:
-                logger.warning(f"Failed to load token.json: {e}")
-        
-        # Try migration_files/api_v1_users_login_test.json as fallback
-        test_token_file = project_root / 'migration_files' / 'api_v1_users_login_test.json'
-        if test_token_file.exists():
-            try:
-                with open(test_token_file, 'r') as f:
-                    data = json.load(f)
-                self.access_token = data.get('accessToken')
-                self.refresh_token = data.get('refreshToken')
-                self.access_token_expires_at = self._parse_iso_timestamp(
-                    data.get('accessTokenExpiresAt', '')
-                )
-                self.refresh_token_expires_at = self._parse_iso_timestamp(
-                    data.get('refreshTokenExpiresAt', '')
-                )
-                logger.info("Loaded tokens from migration_files/api_v1_users_login_test.json")
-                return True
-            except Exception as e:
-                logger.warning(f"Failed to load test token file: {e}")
-        
-        return False
+    def _get_credentials(self) -> tuple[Optional[str], Optional[str]]:
+        """Get credentials from environment variables."""
+        email = os.environ.get('TRADERVOLT_EMAIL')
+        password = os.environ.get('TRADERVOLT_PASSWORD')
+        return email, password
     
-    def is_token_expired(self) -> bool:
-        """Check if access token is expired or will expire within 60 seconds."""
-        if not self.access_token_expires_at:
-            return True
-        # Add 60 second buffer for safety
-        buffer_time = datetime.now(timezone.utc)
-        return self.access_token_expires_at <= buffer_time
+    def _save_token_cache(self) -> None:
+        """Save current tokens to cache file."""
+        try:
+            # Ensure out directory exists
+            self.token_cache_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            cache_data = {
+                'accessToken': self.access_token,
+                'refreshToken': self.refresh_token,
+                'accessTokenExpiresAt': self.access_token_expires_at.isoformat() if self.access_token_expires_at else None,
+                'refreshTokenExpiresAt': self.refresh_token_expires_at.isoformat() if self.refresh_token_expires_at else None,
+                'cachedAt': datetime.now(timezone.utc).isoformat(),
+            }
+            
+            with open(self.token_cache_path, 'w') as f:
+                json.dump(cache_data, f, indent=2)
+            
+            logger.debug(f"Saved token cache to {self.token_cache_path}")
+        except Exception as e:
+            logger.warning(f"Failed to save token cache: {e}")
     
-    def refresh_access_token(self) -> bool:
-        """Refresh the access token using the refresh token."""
-        if not self.refresh_token:
-            logger.error("No refresh token available")
+    def _load_token_cache(self) -> bool:
+        """Load tokens from cache file if valid."""
+        if not self.token_cache_path.exists():
+            return False
+        
+        try:
+            with open(self.token_cache_path, 'r') as f:
+                data = json.load(f)
+            
+            self.access_token = data.get('accessToken')
+            self.refresh_token = data.get('refreshToken')
+            self.access_token_expires_at = self._parse_iso_timestamp(
+                data.get('accessTokenExpiresAt', '')
+            )
+            self.refresh_token_expires_at = self._parse_iso_timestamp(
+                data.get('refreshTokenExpiresAt', '')
+            )
+            
+            # Check if refresh token is still valid
+            if self.refresh_token_expires_at:
+                if self.refresh_token_expires_at <= datetime.now(timezone.utc):
+                    logger.info("Cached refresh token expired, need to re-login")
+                    return False
+            
+            logger.info("Loaded tokens from cache")
+            return True
+            
+        except Exception as e:
+            logger.warning(f"Failed to load token cache: {e}")
+            return False
+    
+    def login(self) -> bool:
+        """Login using credentials from environment variables."""
+        email, password = self._get_credentials()
+        
+        if not email or not password:
+            logger.error("Missing credentials. Set TRADERVOLT_EMAIL and TRADERVOLT_PASSWORD environment variables.")
             return False
         
         try:
             response = requests.post(
-                f"{self.base_url}/api/v1/users/refresh_token",
+                f"{self.BASE_URL}/api/v1/users/login",
+                json={
+                    "username": email,
+                    "password": password,
+                    "rememberMe": True
+                },
+                headers={"Content-Type": "application/json"},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                self.access_token = data.get('accessToken')
+                self.refresh_token = data.get('refreshToken')
+                self.access_token_expires_at = self._parse_iso_timestamp(
+                    data.get('accessTokenExpiresAt', '')
+                )
+                self.refresh_token_expires_at = self._parse_iso_timestamp(
+                    data.get('refreshTokenExpiresAt', '')
+                )
+                
+                # Cache for next run
+                self._save_token_cache()
+                
+                logger.info("Successfully logged in to TraderVolt")
+                return True
+            else:
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get('description', response.text)
+                except:
+                    error_msg = response.text
+                logger.error(f"Login failed ({response.status_code}): {error_msg}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Login error: {e}")
+            return False
+    
+    def is_token_expired(self) -> bool:
+        """Check if access token is expired or will expire within 60 seconds."""
+        if not self.access_token or not self.access_token_expires_at:
+            return True
+        buffer = timedelta(seconds=60)
+        return self.access_token_expires_at <= (datetime.now(timezone.utc) + buffer)
+    
+    def refresh_access_token(self) -> bool:
+        """Refresh the access token using the refresh token."""
+        if not self.refresh_token:
+            logger.debug("No refresh token available")
+            return False
+        
+        try:
+            response = requests.post(
+                f"{self.BASE_URL}/api/v1/users/refresh_token",
                 json={"refreshToken": self.refresh_token},
                 headers={"Content-Type": "application/json"},
                 timeout=30
@@ -133,23 +199,49 @@ class TokenManager:
                 self.access_token_expires_at = self._parse_iso_timestamp(
                     data.get('accessTokenExpiresAt', '')
                 )
+                
+                # Update cache
+                self._save_token_cache()
+                
                 logger.info("Successfully refreshed access token")
                 return True
             else:
-                logger.error(f"Token refresh failed: {response.status_code} - {response.text}")
+                logger.debug(f"Token refresh failed: {response.status_code}")
                 return False
                 
         except Exception as e:
-            logger.error(f"Token refresh error: {e}")
+            logger.debug(f"Token refresh error: {e}")
             return False
     
+    def ensure_authenticated(self) -> bool:
+        """
+        Ensure we have a valid access token.
+        Tries: cached token → refresh → login
+        """
+        # If we have a valid token, use it
+        if self.access_token and not self.is_token_expired():
+            return True
+        
+        # Try to load from cache
+        if not self.access_token:
+            self._load_token_cache()
+        
+        # If token is still valid after loading cache, use it
+        if self.access_token and not self.is_token_expired():
+            return True
+        
+        # Try to refresh
+        if self.refresh_token and self.refresh_access_token():
+            return True
+        
+        # Fall back to login
+        return self.login()
+    
     def get_valid_token(self) -> Optional[str]:
-        """Get a valid access token, refreshing if necessary."""
-        if self.is_token_expired():
-            if not self.refresh_access_token():
-                # If refresh fails, return current token anyway (might still work)
-                logger.warning("Using potentially expired token")
-        return self.access_token
+        """Get a valid access token, authenticating if necessary."""
+        if self.ensure_authenticated():
+            return self.access_token
+        return None
 
 
 class RateLimiter:
@@ -189,10 +281,6 @@ class TraderVoltClient:
         self.token_manager = TokenManager()
         self.rate_limiter = RateLimiter(rate_limit)
         self.session = self._create_session()
-        
-        # Load token
-        if not self.token_manager.load_token():
-            logger.warning("No token loaded - API calls will fail until token is provided")
     
     def _create_session(self) -> requests.Session:
         """Create a requests session with retry logic."""

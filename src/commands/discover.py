@@ -36,25 +36,14 @@ def run_discover(args) -> int:
     # Initialize client
     client = TraderVoltClient()
     
-    # Check if we have a token
-    if not client.token_manager.access_token:
-        print("❌ ERROR: No access token found!")
-        print("   Set TRADERVOLT_ACCESS_TOKEN environment variable or create token.json")
+    # Authenticate (auto-login if needed)
+    print("🔐 Authenticating...")
+    if not client.token_manager.ensure_authenticated():
+        print("❌ ERROR: Authentication failed!")
+        print("   Set TRADERVOLT_EMAIL and TRADERVOLT_PASSWORD environment variables.")
         return 1
     
-    # Try to verify token is valid by checking expiry
-    if client.token_manager.is_token_expired():
-        print("⚠️  Access token appears expired, attempting refresh...")
-        if client.token_manager.refresh_access_token():
-            print("✓ Token refreshed successfully")
-        else:
-            print("❌ ERROR: Token refresh failed!")
-            print("   The refresh token may have expired. Please re-authenticate:")
-            print("   1. Login to TraderVolt to get a new token")
-            print("   2. Save it to token.json or set TRADERVOLT_ACCESS_TOKEN env var")
-            return 1
-    
-    print(f"✓ Access token loaded")
+    print("✓ Authenticated successfully")
     
     # Define endpoints to discover
     endpoints = [

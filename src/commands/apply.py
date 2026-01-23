@@ -331,12 +331,14 @@ For safe testing, use test mode instead:
     # Initialize client
     client = TraderVoltClient()
     
-    if not client.token_manager.access_token:
-        print("\n❌ No access token found!")
-        print("   Set TRADERVOLT_ACCESS_TOKEN environment variable or create token.json")
+    # Authenticate (auto-login if needed)
+    print("\n🔐 Authenticating...")
+    if not client.token_manager.ensure_authenticated():
+        print("❌ ERROR: Authentication failed!")
+        print("   Set TRADERVOLT_EMAIL and TRADERVOLT_PASSWORD environment variables.")
         return 1
     
-    print(f"\n✓ Access token loaded")
+    print("✓ Authenticated successfully")
     
     # Execute migration
     executor = MigrationExecutor(

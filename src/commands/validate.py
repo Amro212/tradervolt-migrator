@@ -114,7 +114,7 @@ def run_validate(args) -> int:
     
     try:
         client = TraderVoltClient()
-        if client.token_manager.access_token:
+        if client.token_manager.ensure_authenticated():
             # Get existing entities
             existing: Dict[str, List[str]] = {}
             

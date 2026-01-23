@@ -32,24 +32,21 @@ pip install -r requirements.txt
 
 ### Authentication
 
-The tool requires a TraderVolt access token. Provide it via:
+The tool automatically handles authentication using your TraderVolt credentials. Set these environment variables:
 
-1. **Environment variable** (preferred):
-   ```bash
-   export TRADERVOLT_ACCESS_TOKEN="your-token-here"
-   ```
+```bash
+export TRADERVOLT_EMAIL="your-email@example.com"
+export TRADERVOLT_PASSWORD="your-password"
+```
 
-2. **token.json file** in project root:
-   ```json
-   {
-     "accessToken": "...",
-     "refreshToken": "...",
-     "accessTokenExpiresAt": "2025-01-23T12:00:00Z",
-     "refreshTokenExpiresAt": "2025-02-23T12:00:00Z"
-   }
-   ```
+**How it works:**
+1. On first run, the tool logs in using your credentials
+2. Tokens are cached to `out/token.json` (gitignored)
+3. On subsequent runs, cached tokens are reused until expired
+4. When access token expires (~7 min), it auto-refreshes
+5. When refresh token expires (~30 days), it re-logs in automatically
 
-3. **migration_files/api_v1_users_login_test.json** (fallback for development)
+No manual token management required!
 
 ### Source Data
 
@@ -169,24 +166,24 @@ out/
 - Exponential backoff on 429/5xx errors
 - Automatic retry (3 attempts)
 
-## Token Refresh
+## Token Management
 
-Access tokens expire after ~7 minutes. The tool automatically:
-- Checks token expiry before each request (with 60s buffer)
-- Refreshes using the refresh token
-- Refresh tokens valid for ~30 days
+The tool fully automates token lifecycle:
+
+1. **Login**: Uses `TRADERVOLT_EMAIL` and `TRADERVOLT_PASSWORD` env vars
+2. **Caching**: Tokens saved to `out/token.json` between runs
+3. **Refresh**: Auto-refreshes access tokens before expiry (~7 min)
+4. **Re-login**: Auto re-logs in if refresh token expires (~30 days)
 
 ## Troubleshooting
 
-### No access token found
+### Authentication failed
 
-Set `TRADERVOLT_ACCESS_TOKEN` environment variable or create `token.json`.
-
-### Token refresh failed
-
-1. Check if refresh token is expired (~30 days)
-2. Re-authenticate via TraderVolt login API
-3. Save new tokens to `token.json`
+Ensure environment variables are set:
+```bash
+export TRADERVOLT_EMAIL="your-email@example.com"
+export TRADERVOLT_PASSWORD="your-password"
+```
 
 ### Entity already exists
 

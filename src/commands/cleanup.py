@@ -37,9 +37,14 @@ def run_cleanup(args) -> int:
     # Initialize client
     client = TraderVoltClient()
     
-    if not client.token_manager.access_token:
-        print("\n❌ No access token found!")
+    # Authenticate (auto-login if needed)
+    print("\n🔐 Authenticating...")
+    if not client.token_manager.ensure_authenticated():
+        print("❌ ERROR: Authentication failed!")
+        print("   Set TRADERVOLT_EMAIL and TRADERVOLT_PASSWORD environment variables.")
         return 1
+    
+    print("✓ Authenticated successfully\n")
     
     # Delete order (reverse of creation order)
     # Must delete dependent entities before their parents
