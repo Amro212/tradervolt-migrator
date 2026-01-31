@@ -116,10 +116,14 @@ class TradersGroup:
 class Trader:
     """Trader (account) configuration."""
     login: int
-    name: str
+    firstName: str = ""
+    lastName: str = ""
     email: str = ""
-    group: str = ""
-    tradersGroupId: Optional[str] = None
+    phone: str = ""
+    group: str = ""  # MT5 group path for reference
+    tradersGroupId: Optional[str] = None  # TraderVolt UUID
+    tradeType: str = "Demo"  # Demo or Real
+    country: str = ""
     
     # Account details
     balance: float = 0.0
@@ -134,17 +138,26 @@ class Trader:
     
     id: Optional[str] = None  # Set by TraderVolt after creation
     
+    # Legacy field for backwards compatibility
+    name: str = ""
+    
     def to_api_payload(self) -> Dict[str, Any]:
         """Convert to TraderVolt API payload format."""
         payload = {
-            "login": self.login,
-            "name": self.name,
+            "firstName": self.firstName or self.name,
+            "lastName": self.lastName or str(self.login),
             "email": self.email,
+            "phone": self.phone,
+            "country": self.country,
             "balance": self.balance,
             "credit": self.credit,
             "leverage": self.leverage,
+            "tradeType": self.tradeType,
             "isEnabled": self.isEnabled,
             "isReadOnly": self.isReadOnly,
+            # Include MT5 login as reference
+            "mt5_login": self.login,
+            "mt5_group": self.group,
         }
         if self.tradersGroupId:
             payload["tradersGroupId"] = self.tradersGroupId

@@ -84,16 +84,29 @@ def parse_clients(file_path: str) -> List[Dict[str, Any]]:
         client = {
             'id': row.get('ID', ''),
             'name': row.get('Name', ''),
+            'middle_name': row.get('Middle name', ''),
+            'last_name': row.get('Second name', ''),
             'email': row.get('E-mail', '') or row.get('Email', ''),
             'phone': row.get('Phone', ''),
             'country': row.get('Country', ''),
             'city': row.get('City', ''),
-            'address': row.get('Address', ''),
-            'zipcode': row.get('Zipcode', ''),
+            'street': row.get('Street', ''),
+            'postcode': row.get('Postcode', ''),
             'state': row.get('State', ''),
-            'registration': row.get('Registration', ''),
+            'birth_date': row.get('Birth Date', ''),
+            'gender': row.get('Gender', ''),
+            'citizenship': row.get('Citizenship', ''),
+            'tax_id': row.get('Tax ID', ''),
+            'document_type': row.get('Document Type', ''),
+            'document_number': row.get('Document Number', ''),
+            'status': row.get('Status', ''),
+            'kyc_status': row.get('KYC Status', ''),
+            'lead_campaign': row.get('Lead Campaign', ''),
+            'lead_source': row.get('Lead Source', ''),
+            'annual_income': row.get('Annual Income', ''),
+            'net_worth': row.get('Net Worth', ''),
+            'employment_status': row.get('Employment Status', ''),
             'comment': row.get('Comment', ''),
-            # Store raw row for debugging
             '_raw': row
         }
         clients.append(client)
@@ -131,21 +144,44 @@ def parse_accounts(file_path: str) -> List[Dict[str, Any]]:
             except:
                 return 0
         
+        def parse_leverage(s: str) -> int:
+            """Parse leverage from format like '1 : 100' -> 100 or plain '100' -> 100."""
+            try:
+                if ':' in s:
+                    # Format is "1 : 100", extract the number after ':'
+                    parts = s.split(':')
+                    if len(parts) == 2:
+                        return int(parts[1].strip())
+                # Plain number format
+                return int(re.sub(r'[^\d]', '', s)) if s else 100
+            except:
+                return 100
+        
         account = {
             'login': login,
             'name': row.get('Name', ''),
+            'last_name': row.get('Last name', ''),
+            'middle_name': row.get('Middle name', ''),
             'group': row.get('Group', ''),
             'email': row.get('E-mail', '') or row.get('Email', ''),
+            'phone': row.get('Phone', ''),
+            'country': row.get('Country', ''),
+            'city': row.get('City', ''),
+            'state': row.get('State', ''),
+            'postcode': row.get('ZIP', '') or row.get('Postcode', ''),
+            'address': row.get('Address', ''),
             'balance': parse_float(row.get('Balance', '0')),
             'credit': parse_float(row.get('Credit', '0')),
             'equity': parse_float(row.get('Equity', '0')),
             'margin': parse_float(row.get('Margin', '0')),
             'margin_free': parse_float(row.get('Free Margin', '0')),
-            'leverage': parse_int(row.get('Leverage', '100')),
+            'leverage': parse_leverage(row.get('Leverage', '100')),
+            'language': row.get('Language', ''),
+            'lead_campaign': row.get('Lead campaign', ''),
+            'lead_source': row.get('Lead source', ''),
             'comment': row.get('Comment', ''),
             'registration': row.get('Registration', ''),
             'last_access': row.get('Last Access', ''),
-            # Store raw row for debugging
             '_raw': row
         }
         accounts.append(account)
@@ -206,18 +242,21 @@ def parse_orders(file_path: str) -> List[Dict[str, Any]]:
         order = {
             'order_id': parse_int(row.get('Order', '0')),
             'login': parse_int(row.get('Login', '0')),
+            'position_id': parse_int(row.get('Position', '0')),
+            'external_id': row.get('ID', ''),
             'symbol': row.get('Symbol', ''),
             'order_type': order_type,
             'state': state,
-            'volume': parse_float(row.get('Volume', '0')),
-            'volume_current': parse_float(row.get('Volume Current', '0')),
+            'volume_initial': parse_float(row.get('Initial volume', '0')),
+            'volume_current': parse_float(row.get('Current volume', '0')),
             'price': parse_float(row.get('Price', '0')),
-            'price_current': parse_float(row.get('Price Current', '0')),
+            'trigger_price': parse_float(row.get('Trigger', '0')),
             'stop_loss': parse_float(row.get('S / L', '0') or row.get('Stop Loss', '0')),
             'take_profit': parse_float(row.get('T / P', '0') or row.get('Take Profit', '0')),
-            'time_setup': parse_timestamp(row.get('Time Setup', '')),
-            'time_expiration': parse_timestamp(row.get('Time Expiration', '')),
-            'time_done': parse_timestamp(row.get('Time Done', '')),
+            'time_setup': parse_timestamp(row.get('Time', '')),
+            'time_expiration': parse_timestamp(row.get('Expiration', '')),
+            'reason': row.get('Reason', ''),
+            'dealer': row.get('Dealer', ''),
             'comment': row.get('Comment', ''),
             '_raw': row
         }
@@ -264,16 +303,19 @@ def parse_positions(file_path: str) -> List[Dict[str, Any]]:
         position = {
             'position_id': parse_int(row.get('Position', '0')),
             'login': parse_int(row.get('Login', '0')),
+            'external_id': row.get('ID', ''),
             'symbol': row.get('Symbol', ''),
             'position_type': position_type,
             'volume': parse_float(row.get('Volume', '0')),
-            'price_open': parse_float(row.get('Price', '0') or row.get('Price Open', '0')),
-            'price_current': parse_float(row.get('Price Current', '0')),
-            'stop_loss': parse_float(row.get('S / L', '0') or row.get('Stop Loss', '0')),
-            'take_profit': parse_float(row.get('T / P', '0') or row.get('Take Profit', '0')),
+            'gateway_volume': parse_float(row.get('Gateway Volume', '0')),
+            'price_open': parse_float(row.get('Price', '0')),
+            'price_current': parse_float(row.get('Current Price', '0')),
+            'stop_loss': parse_float(row.get('Stop Loss', '0')),
+            'take_profit': parse_float(row.get('Take Profit', '0')),
             'swap': parse_float(row.get('Swap', '0')),
             'profit': parse_float(row.get('Profit', '0')),
-            'time_open': parse_timestamp(row.get('Time', '') or row.get('Time Open', '')),
+            'reason': row.get('Reason', ''),
+            'time_open': parse_timestamp(row.get('Time', '')),
             'comment': row.get('Comment', ''),
             '_raw': row
         }
