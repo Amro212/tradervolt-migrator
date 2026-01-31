@@ -254,19 +254,21 @@ class MigratorApp:
         
         ttk.Separator(frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=15)
         
-        # Summary treeview
+        # Summary treeview with expandable rows
         tree_frame = ttk.Frame(frame)
         tree_frame.pack(fill=tk.BOTH, expand=True)
         
         columns = ('entity_type', 'source_count', 'existing', 'to_create', 'skipped')
-        self.plan_tree = ttk.Treeview(tree_frame, columns=columns, show='headings', height=8)
+        self.plan_tree = ttk.Treeview(tree_frame, columns=columns, show='tree headings', height=8)
         
+        self.plan_tree.heading('#0', text='▶')
         self.plan_tree.heading('entity_type', text='Entity Type')
         self.plan_tree.heading('source_count', text='In Source')
         self.plan_tree.heading('existing', text='Already Exists')
         self.plan_tree.heading('to_create', text='To Create')
         self.plan_tree.heading('skipped', text='Skipped')
         
+        self.plan_tree.column('#0', width=30, stretch=False)
         self.plan_tree.column('entity_type', width=150)
         self.plan_tree.column('source_count', width=100, anchor=tk.CENTER)
         self.plan_tree.column('existing', width=120, anchor=tk.CENTER)
@@ -278,6 +280,9 @@ class MigratorApp:
         
         self.plan_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Bind double-click to show details
+        self.plan_tree.bind('<Double-Button-1>', self.on_tree_double_click)
         
         # Warnings area
         ttk.Label(frame, text="Warnings:", font=('Segoe UI', 10, 'bold')).pack(anchor=tk.W, pady=(10, 5))
@@ -684,16 +689,52 @@ class MigratorApp:
             with open(plan_path, 'r') as f:
                 plan = json.load(f)
             
-            # Populate tree with comparison data
+            # Store plan for detail view
+            self.current_plan = plan
+            
+            # Populate tree with comparison data and entities
             if 'comparison' in plan:
+                entities = plan.get('entities', {})
+                
                 for entity_type, counts in plan['comparison'].items():
-                    self.plan_tree.insert('', tk.END, values=(
+                    # Insert parent row
+                    parent = self.plan_tree.insert('', tk.END, text='', values=(
                         entity_type,
                         counts.get('source', 0),
                         counts.get('existing', 0),
                         counts.get('to_create', 0),
                         counts.get('skipped', 0)
-                    ))
+                    ), tags=('parent',))
+                    
+                    # Add child rows with entity details (collapsed by default)
+                    entity_list = entities.get(entity_type, [])
+                    if entity_list:
+                        # Limit to first 5 for preview, add "..." if more
+                        display_count = min(5, len(entity_list))
+                        for i, entity in enumerate(entity_list[:display_count]):
+                            # Get key identifying field
+                            display_name = (
+                                entity.get('name') or 
+                                entity.get('email') or 
+                                entity.get('Symbol') or
+                                entity.get('login') or
+                                f"Entity {i+1}"
+                            )
+                            
+                            # Show key fields in columns
+                            detail_text = self._format_entity_preview(entity, entity_type)
+                            
+                            self.plan_tree.insert(parent, tk.END, text='', values=(
+                                f"  {display_name}",
+                                detail_text,
+                                '', '', ''
+                            ), tags=('child',))
+                        
+                        if len(entity_list) > display_count:
+                            self.plan_tree.insert(parent, tk.END, text='', values=(
+                                f"  ... and {len(entity_list) - display_count} more",
+                                '', '', '', ''
+                            ), tags=('child',))
             
             # Update summary label
             total_create = sum(c.get('to_create', 0) for c in plan.get('comparison', {}).values())
@@ -708,6 +749,102 @@ class MigratorApp:
             else:
                 self.txt_warnings.insert(tk.END, "No warnings.")
             self.txt_warnings.configure(state=tk.DISABLED)
+    
+    def _format_entity_preview(self, entity, entity_type):
+        """Format entity data for preview display."""
+        if entity_type == 'symbols':
+            desc = entity.get('Description', entity.get('description', ''))
+            return desc[:40] + '...' if len(desc) > 40 else desc
+        elif entity_type == 'traders':
+            parts = []
+            if entity.get('firstName'):
+                parts.append(entity['firstName'])
+            if entity.get('lastName'):
+                parts.append(entity['lastName'])
+            if entity.get('email'):
+                parts.append(f"({entity['email']})")
+            return ' '.join(parts)[:60]
+        elif entity_type == 'orders':
+            symbol = entity.get('symbol', '?')
+            volume = entity.get('volume', 0)
+            return f"{symbol} | Vol: {volume}"
+        elif entity_type == 'positions':
+            symbol = entity.get('symbol', '?')
+            volume = entity.get('volume', 0)
+            return f"{symbol} | Vol: {volume}"
+        else:
+            return ''
+    
+    def on_tree_double_click(self, event):
+        """Handle double-click on tree item to show full details."""
+        item = self.plan_tree.selection()
+        if not item:
+            return
+        
+        # Get the item's values
+        values = self.plan_tree.item(item[0], 'values')
+        if not values:
+            return
+        
+        entity_type = values[0].strip()
+        
+        # If it's a parent row with entities, show detail window
+        if hasattr(self, 'current_plan') and entity_type in self.current_plan.get('entities', {}):
+            self.show_entity_details(entity_type)
+    
+    def show_entity_details(self, entity_type):
+        """Show a popup window with full entity details."""
+        entities = self.current_plan.get('entities', {}).get(entity_type, [])
+        if not entities:
+            return
+        
+        # Create popup window
+        detail_window = tk.Toplevel(self.root)
+        detail_window.title(f"{entity_type} - Details ({len(entities)} items)")
+        detail_window.geometry("800x600")
+        
+        # Header
+        header = ttk.Label(detail_window, text=f"{entity_type.upper()} ({len(entities)} total)", 
+                          font=('Segoe UI', 12, 'bold'))
+        header.pack(pady=10)
+        
+        # Scrollable text area
+        text_frame = ttk.Frame(detail_window)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        txt = scrolledtext.ScrolledText(text_frame, font=('Consolas', 9), wrap=tk.WORD)
+        txt.pack(fill=tk.BOTH, expand=True)
+        
+        # Display entities
+        import json
+        for i, entity in enumerate(entities, 1):
+            txt.insert(tk.END, f"{'='*70}\n")
+            txt.insert(tk.END, f"Item {i}/{len(entities)}\n")
+            txt.insert(tk.END, f"{'='*70}\n")
+            
+            # Format nicely based on entity type
+            if entity_type == 'symbols':
+                txt.insert(tk.END, f"Symbol: {entity.get('name', 'N/A')}\n")
+                txt.insert(tk.END, f"Description: {entity.get('Description', entity.get('description', 'N/A'))}\n")
+                txt.insert(tk.END, f"Group: {entity.get('symbolsGroupId', 'N/A')}\n")
+                txt.insert(tk.END, f"Digits: {entity.get('Digits', entity.get('digits', 'N/A'))}\n")
+            elif entity_type == 'traders':
+                txt.insert(tk.END, f"Name: {entity.get('firstName', '')} {entity.get('lastName', '')}\n")
+                txt.insert(tk.END, f"Email: {entity.get('email', 'N/A')}\n")
+                txt.insert(tk.END, f"Login: {entity.get('login', 'N/A')}\n")
+                txt.insert(tk.END, f"Group: {entity.get('tradersGroupId', 'N/A')}\n")
+                txt.insert(tk.END, f"Leverage: {entity.get('leverage', 'N/A')}\n")
+            else:
+                # Generic JSON display
+                txt.insert(tk.END, json.dumps(entity, indent=2))
+            
+            txt.insert(tk.END, "\n\n")
+        
+        txt.configure(state=tk.DISABLED)
+        
+        # Close button
+        btn_close = ttk.Button(detail_window, text="Close", command=detail_window.destroy)
+        btn_close.pack(pady=10)
 
 
 def main():
