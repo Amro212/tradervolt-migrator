@@ -1,5 +1,8 @@
 # TraderVolt Migration Tool Dependencies
 
+# Environment variable management
+python-dotenv>=1.0.0
+
 # HTTP client with retry support
 requests>=2.31.0
 urllib3>=2.0.0
@@ -9,3 +12,5 @@ beautifulsoup4>=4.12.0
 
 # For lxml parser (faster than html.parser)
 lxml>=4.9.0
+# For building Windows executable (optional)
+pyinstaller>=6.0.0
